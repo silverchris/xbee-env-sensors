@@ -1,0 +1,258 @@
+#! /usr/bin/python
+
+"""
+dispatch_async.py
+
+By Paul Malmsten, 2010
+pmalmsten@gmail.com
+
+This example continuously reads the serial port and dispatches packets
+which arrive to appropriate methods for processing in a separate thread.
+"""
+
+from xbee import ZigBee
+import time
+import serial
+from datetime import datetime, timedelta
+import binascii
+import os
+import sys
+import importlib
+from twisted.internet.protocol import Factory, Protocol
+from twisted.protocols.basic import LineReceiver
+from twisted.internet.endpoints import TCP4ServerEndpoint
+from twisted.internet import reactor
+import logging
+import copy
+
+
+PORT = '/dev/ttyUSB0'
+BAUD_RATE = 9600
+
+Module_Path = os.path.join(os.path.dirname(os.path.realpath(__file__)),"Modules")
+
+logging.basicConfig(filename='Sensor.log',level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+
+class SensorFactory:
+        factories = {}
+        def addFactory(id, sensorFactory):
+                SensorFactory.factories[id] = sensorFactory
+        addFactory = staticmethod(addFactory)
+        # A Template Method:
+        def createSensor(id):
+                return SensorFactory.factories[id]
+        createSensor = staticmethod(createSensor)
+
+class Dispatch(object):
+        def __init__(self, ser=None, xbee=None, unhandled_callback=None):
+                self.xbee = None
+                if xbee:
+                        self.xbee = xbee
+                elif ser:
+                        self.xbee = ZigBee(ser,escaped=True)
+                self.unhandled = unhandled_callback
+                self.handlers = []
+                self.names = set()
+                self.message_count = 0
+        
+        def register(self, name, callback, filter):
+                """
+                register: string, function: string, data -> None, function: data -> boolean -> None
+                
+                Register will save the given name, callback, and filter function
+                for use when a packet arrives. When one arrives, the filter
+                function will be called to determine whether to call its associated
+                callback function. If the filter method returns true, the callback
+                method will be called with its associated name string and the packet
+                which triggered the call.
+                """
+                if name in self.names:
+                        raise ValueError("A callback has already been registered with the name '%s'" % name)
+                
+                self.handlers.append({'name':name,'callback':callback,'filter':filter})
+                self.names.add(name)
+                
+        def run(self, oneshot=False):
+                """
+                run: boolean -> None
+                
+                run will read and dispatch any packet which arrives from the 
+                XBee device
+                """
+                if not self.xbee:
+                        raise ValueError("Either a serial port or an XBee must be provided to __init__ to execute run()")
+                
+                while True:
+                        self.dispatch(self.xbee.wait_read_frame())
+                        
+                        if oneshot:
+                                break
+
+        def dispatch(self, packet):
+                """
+                dispatch: XBee data dict -> None
+                
+                When called, dispatch checks the given packet against each 
+                registered callback method and calls each callback whose filter 
+                function returns true.
+                """
+                print "Frame Received"
+                handled = False
+                for handler in self.handlers:
+                        try:
+                                if handler['filter'](packet):
+                                        # Call the handler method with its associated
+                                        # name and the packet which passed its filter check
+                                        handler['callback'](self.message_count, packet)
+                                        handled = True
+                                        break
+                        except KeyError:
+                                pass
+                if handled == False:
+                        self.unhandled(packet,self.message_count)
+
+                self.message_count = self.message_count+1
+
+# Open serial port
+ser = serial.Serial(PORT, BAUD_RATE)
+
+def load_modules(mod_path):
+        
+        if os.path.isdir(mod_path):
+                sys.path.append(mod_path)
+
+        modules = {}
+
+        for f in os.listdir(os.path.abspath(mod_path)):
+                module_name, ext = os.path.splitext(f) # Handles no-extension files, etc.
+                if ext == '.py': # Important, ignore .pyc/other files.
+                        logging.info('imported module: %s'%(module_name))
+                        module = importlib.import_module(module_name,package=module_name)
+                        modules[module_name] = module.Sensor
+                        SensorFactory.addFactory(module_name, modules[module_name])
+
+sensor_id_timeout = {}
+def unhandled(packet,message_count):
+        if 'source_addr_long' in packet:
+                tmp_packet = copy.copy(packet)
+                address_ascii = binascii.hexlify(packet['source_addr_long'])
+                del tmp_packet['source_addr_long']
+                logging.debug("%s: Unhandled packet:%s"%(address_ascii,repr(tmp_packet)))
+                try:
+                        if packet.get('command','') != 'NI':
+                                id_time = sensor_id_timeout.get(address_ascii, datetime(1970,1,1))
+                                if (datetime.now()-id_time).total_seconds() > 60:
+                                        zigbee.send('remote_at',command="NI", dest_addr_long=packet['source_addr_long'], options='\x40', frame_id="1")
+                                        logging.info("%s: Node ID query sent"%binascii.hexlify(packet['source_addr_long']))
+                                        sensor_id_timeout[address_ascii] = datetime.now()
+                                else:
+                                        logging.info("%s: Node ID query already sent, lets wait"%binascii.hexlify(packet['source_addr_long']))
+                except KeyError:
+                        pass
+
+        else:
+                logging.debug("Unhandled Packet: %s"%repr(packet))
+        
+sensors = {}
+        
+def NI_handler(message_count,packet):
+        address_ascii = binascii.hexlify(packet['source_addr_long'])
+        if address_ascii not in sensors:
+                logging.info("%s: Discovered type %s"%(address_ascii,repr(packet['parameter'])))
+                sensorclass = SensorFactory.createSensor(packet['parameter'])
+                try:
+                        sensors[address_ascii] = sensorclass(packet['source_addr_long'],dispatch)
+                except ValueError:
+                        logging.warning("Sensor Class %s Not Registered"%packet['parameter'])
+
+# When a Dispatch is created with a serial port, it will automatically
+# create an XBee object on your behalf for accessing the device.
+# If you wish, you may explicitly provide your own XBee:
+#
+#  xbee = XBee(ser)
+#  dispatch = Dispatch(xbee=xbee)
+#
+# Functionally, these are the same.
+dispatch = Dispatch(ser=ser,unhandled_callback=unhandled)
+
+# Register the packet handlers with the dispatch:
+#  The string name allows one to distinguish between mutiple registrations
+#   for a single callback function
+#  The second argument is the function to call
+#  The third argument is a function which determines whether to call its
+#   associated callback when a packet arrives. It should return a boolean.
+dispatch.register("NI", NI_handler, lambda packet: packet['command']=='NI')
+
+# Create API object, which spawns a new thread
+# Point the asyncronous callback at Dispatch.dispatch()
+#  This method will dispatch a single XBee data packet when called
+zigbee = ZigBee(ser, callback=dispatch.dispatch, escaped=True)
+
+
+load_modules(Module_Path)
+
+def nodes(parameter=""):
+        logging.debug("Munin: nodes called")
+        return "sensors"
+
+def config(parameter=""):
+        logging.debug("Munin: config called on address {address}".format(address=parameter))
+        return sensors[parameter].Munin_config()
+
+def list_sensors(parameter=""):
+        logging.debug("Munin: list called")
+        commands = ""
+        for sensor in sensors:
+                if sensor != "":
+                        commands = "{0} {1}".format(commands, sensor).lstrip()
+        commands = commands
+        return commands
+
+def fetch(parameter=""):
+        logging.debug("Munin: fetch called on address {address}".format(address=parameter))
+        return sensors[parameter].Munin_fetch()
+
+def version(parameter=""):
+        logging.debug("Munin: version called")
+        return "1"
+
+def cap(parameter=""):
+        return "cap multigraph"
+
+
+commands = {'nodes':nodes,'config':config,'list':list_sensors,'fetch':fetch,'version':version,'cap':cap}
+
+class Echo(LineReceiver):
+        delimiter = '\n'
+        def connectionMade(self):
+                self.sendLine("# munin node at Sensors")
+                logging.debug("Munin: Connection from {0}".format(self.transport.getPeer()))
+                
+        def lineReceived(self, line):
+                print line
+                data = line.split(" ")
+                if line == "quit":
+                        self.transport.loseConnection()
+                else:
+                        try:
+                                try:
+                                        self.sendLine(commands[data[0].strip("\r")](data[1].strip("\r")))
+                                except IndexError:
+                                        self.sendLine(commands[data[0].strip("\r")]())
+                        except KeyError:
+                                self.sendLine("# Unknown Command")
+
+class EchoFactory(Factory):
+        def __init__(self):
+                pass
+        def buildProtocol(self,addr):
+                return Echo()
+
+endpoint = TCP4ServerEndpoint(reactor, 8007)
+endpoint.listen(EchoFactory())
+reactor.run()
+
+# halt() must be called before closing the serial
+# port in order to ensure proper thread shutdown
+zigbee.halt()
+ser.close()
