@@ -1,15 +1,5 @@
 #! /usr/bin/python
 
-"""
-dispatch_async.py
-
-By Paul Malmsten, 2010
-pmalmsten@gmail.com
-
-This example continuously reads the serial port and dispatches packets
-which arrive to appropriate methods for processing in a separate thread.
-"""
-
 from xbee import ZigBee
 import time
 import serial
@@ -18,13 +8,13 @@ import binascii
 import os
 import sys
 import importlib
-from twisted.internet.protocol import Factory, Protocol
-from twisted.protocols.basic import LineReceiver
 from twisted.internet.endpoints import TCP4ServerEndpoint
 from twisted.internet import reactor
 import logging
 import copy
 
+
+import munin
 
 PORT = '/dev/ttyUSB0'
 BAUD_RATE = 9600
@@ -191,65 +181,8 @@ zigbee = ZigBee(ser, callback=dispatch.dispatch, escaped=True)
 
 load_modules(Module_Path)
 
-def nodes(parameter=""):
-        logging.debug("Munin: nodes called")
-        return "sensors"
-
-def config(parameter=""):
-        logging.debug("Munin: config called on address {address}".format(address=parameter))
-        return sensors[parameter].Munin_config()
-
-def list_sensors(parameter=""):
-        logging.debug("Munin: list called")
-        commands = ""
-        for sensor in sensors:
-                if sensor != "":
-                        commands = "{0} {1}".format(commands, sensor).lstrip()
-        commands = commands
-        return commands
-
-def fetch(parameter=""):
-        logging.debug("Munin: fetch called on address {address}".format(address=parameter))
-        return sensors[parameter].Munin_fetch()
-
-def version(parameter=""):
-        logging.debug("Munin: version called")
-        return "1"
-
-def cap(parameter=""):
-        return "cap multigraph"
-
-
-commands = {'nodes':nodes,'config':config,'list':list_sensors,'fetch':fetch,'version':version,'cap':cap}
-
-class Echo(LineReceiver):
-        delimiter = '\n'
-        def connectionMade(self):
-                self.sendLine("# munin node at Sensors")
-                logging.debug("Munin: Connection from {0}".format(self.transport.getPeer()))
-                
-        def lineReceived(self, line):
-                print line
-                data = line.split(" ")
-                if line == "quit":
-                        self.transport.loseConnection()
-                else:
-                        try:
-                                try:
-                                        self.sendLine(commands[data[0].strip("\r")](data[1].strip("\r")))
-                                except IndexError:
-                                        self.sendLine(commands[data[0].strip("\r")]())
-                        except KeyError:
-                                self.sendLine("# Unknown Command")
-
-class EchoFactory(Factory):
-        def __init__(self):
-                pass
-        def buildProtocol(self,addr):
-                return Echo()
-
 endpoint = TCP4ServerEndpoint(reactor, 8007)
-endpoint.listen(EchoFactory())
+endpoint.listen(munin.MuninFactory(sensors))
 reactor.run()
 
 # halt() must be called before closing the serial
