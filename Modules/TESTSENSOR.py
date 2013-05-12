@@ -1,6 +1,7 @@
 import SensorBase
 import binascii
 import logging
+from datetime import datetime
 
 def adc_convert(sample,scale=1):
         return (((float(sample)*1200)/1023)*scale)/1000
@@ -56,22 +57,27 @@ battery.value {battery}
 class Sensor(SensorBase.Sensor):
         Type = "TESTSENSOR"
         def _localinit(self,dispatch):
-                dispatch.register(binascii.hexlify(self.address)+' rx_io_data_long_addr',
+                dispatch.register(self.address_ascii+' rx_io_data_long_addr',
                         self.rx_io_data_long_addr,lambda packet: packet['source_addr_long']==self.address
                         and packet['id']== 'rx_io_data_long_addr')
+                self.timestamp = datetime.now()
         
         def rx_io_data_long_addr(self,name,packet):
-                #print "Update from %s"%binascii.hexlify(packet['source_addr_long'])
-                #print "Message #: %s"%name
-                #print "Packet Type: %s"%packet['id']
-                #print "Device Type: %s"%self.Type
-                self.temperature = max6605_volt_temp(adc_convert(packet['samples'][0]['adc-2'],1))
-                #self.light = tept5700(adc_convert(packet['samples'][0]['adc-3']),0)
-                self.light = (float(packet['samples'][0]['adc-3'])/1023)*100
-                #self.battery = battery = round(((packet['samples'][0]['adc-7'])*(float(1200)/float(1024))/1000), 3)
-                self.battery = adc_convert(packet['samples'][0]['adc-7'])
-                self.humidity = hih5030(adc_convert(packet['samples'][0]['adc-1'],2),self.battery,self.temperature)
-                #self.report()
+                now = datetime.now()
+                timedelta = (now-self.timestamp).microseconds/1000
+                if timedelta >= 150 and timedelta <= 500:
+                        #ignore updates that come too quickly or too slowly, to make sure sensors have had time
+                        #to stabilize
+                        self.temperature = max6605_volt_temp(adc_convert(packet['samples'][0]['adc-2'],1))
+                        self.light = (float(packet['samples'][0]['adc-3'])/1023)*100
+                        self.battery = adc_convert(packet['samples'][0]['adc-7'])
+                        self.humidity = hih5030(adc_convert(packet['samples'][0]['adc-1'],2),self.battery,self.temperature)
+                        print adc_convert(packet['samples'][0]['adc-3'])
+                        logging.debug("{address}: Valid update processed".format(address=self.address_ascii))
+                elif timedelta < 200:
+                        logging.debug("{address}: Updating too quickly, ignored {time}ms".format(address=self.address_ascii,time=timedelta))
+                elif timedelta < 200:
+                        logging.debug("{address}: Updating too slowly, ignored. {time}ms".format(address=self.address_ascii, time=timedelta))
                 
         def report(self):
                 print "Battery Voltage: %s"%self.battery
