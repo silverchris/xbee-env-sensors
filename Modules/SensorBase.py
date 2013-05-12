@@ -10,7 +10,7 @@ class Sensor(object):
                 #Munin_Commands = {'config':self.Munin_config,'list':self.Munin_list,'fetch':self.Munin_fetch}
                 logging.info("%s: Connected to %s Module"%(self.address_ascii,self.Type))
                 self._localinit(dispatch)
-                dispatch.register(binascii.hexlify(self.address),self.update,lambda packet: packet['source_addr_long']==self.address)
+                #dispatch.register(binascii.hexlify(self.address),self.update,lambda packet: packet['source_addr_long']==self.address)
 
         
         
