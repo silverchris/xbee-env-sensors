@@ -40,7 +40,7 @@ class Munin(LineReceiver):
                 logging.debug("Munin: Connection from {0}".format(self.transport.getPeer()))
                 
         def lineReceived(self, line):
-                print line
+                logging.debug("Munin: {0}: Received Command: {1}".format(self.transport.getPeer().host,line))
                 data = line.split(" ")
                 if line == "quit":
                         self.transport.loseConnection()
