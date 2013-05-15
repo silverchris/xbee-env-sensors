@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 
 def adc_convert(sample,scale=1):
-        return (((float(sample)*1200)/1023)*scale)/1000
+        return round((((float(sample)*1200)/1023)*scale)/1000, 3)
 
 def max6605_volt_temp(voltage):
         return (voltage-0.744)/0.0119
@@ -64,20 +64,21 @@ class Sensor(SensorBase.Sensor):
         
         def rx_io_data_long_addr(self,name,packet):
                 now = datetime.now()
-                timedelta = (now-self.timestamp).microseconds/1000
-                if timedelta >= 150 and timedelta <= 500:
+                timedelta = (now-self.timestamp).total_seconds()
+                if timedelta <.400:
+                        self.timestamp = now
+                        logging.debug("{address}: Time from last Update: {0}".format(timedelta,address=self.address_ascii))
                         #ignore updates that come too quickly or too slowly, to make sure sensors have had time
                         #to stabilize
                         self.temperature = max6605_volt_temp(adc_convert(packet['samples'][0]['adc-2'],1))
                         self.light = (float(packet['samples'][0]['adc-3'])/1023)*100
                         self.battery = adc_convert(packet['samples'][0]['adc-7'])
                         self.humidity = hih5030(adc_convert(packet['samples'][0]['adc-1'],2),self.battery,self.temperature)
-                        print adc_convert(packet['samples'][0]['adc-3'])
+                        print adc_convert(packet['samples'][0]['adc-2'])
                         logging.debug("{address}: Valid update processed".format(address=self.address_ascii))
-                elif timedelta < 200:
-                        logging.debug("{address}: Updating too quickly, ignored {time}ms".format(address=self.address_ascii,time=timedelta))
-                elif timedelta < 200:
-                        logging.debug("{address}: Updating too slowly, ignored. {time}ms".format(address=self.address_ascii, time=timedelta))
+                elif timedelta > .400:
+                        self.timestamp = now
+                        logging.debug("{address}: Updating too slowly, ignored. {time}s".format(address=self.address_ascii, time=timedelta))
                 
         def report(self):
                 print "Battery Voltage: %s"%self.battery
