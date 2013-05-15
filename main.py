@@ -15,8 +15,11 @@ import copy
 
 
 import munin
+import server
 
 PORT = '/dev/ttyUSB0'
+
+#PORT = '/dev/pts/3'
 BAUD_RATE = 9600
 
 Module_Path = os.path.join(os.path.dirname(os.path.realpath(__file__)),"Modules")
@@ -43,7 +46,6 @@ class Dispatch(object):
                 self.unhandled = unhandled_callback
                 self.handlers = []
                 self.names = set()
-                self.message_count = 0
         
         def register(self, name, callback, filter):
                 """
@@ -62,6 +64,12 @@ class Dispatch(object):
                 self.handlers.append({'name':name,'callback':callback,'filter':filter})
                 self.names.add(name)
                 
+        def unregister(self,name):
+                for handler in self.handlers:
+                        if handler['name'] == name:
+                                self.handlers.remove(handler)
+                self.names.remove(name)
+            
         def run(self, oneshot=False):
                 """
                 run: boolean -> None
@@ -87,21 +95,19 @@ class Dispatch(object):
                 function returns true.
                 """
                 print "Frame Received"
+                #print packet
                 handled = False
                 for handler in self.handlers:
                         try:
                                 if handler['filter'](packet):
                                         # Call the handler method with its associated
                                         # name and the packet which passed its filter check
-                                        handler['callback'](self.message_count, packet)
+                                        handler['callback'](handler['name'], packet)
                                         handled = True
-                                        break
                         except KeyError:
                                 pass
                 if handled == False:
-                        self.unhandled(packet,self.message_count)
-
-                self.message_count = self.message_count+1
+                        self.unhandled(packet)
 
 # Open serial port
 ser = serial.Serial(PORT, BAUD_RATE)
@@ -122,7 +128,7 @@ def load_modules(mod_path):
                         SensorFactory.addFactory(module_name, modules[module_name])
 
 sensor_id_timeout = {}
-def unhandled(packet,message_count):
+def unhandled(packet):
         if 'source_addr_long' in packet:
                 tmp_packet = copy.copy(packet)
                 address_ascii = binascii.hexlify(packet['source_addr_long'])
@@ -145,7 +151,7 @@ def unhandled(packet,message_count):
         
 sensors = {}
         
-def NI_handler(message_count,packet):
+def NI_handler(name,packet):
         address_ascii = binascii.hexlify(packet['source_addr_long'])
         if address_ascii not in sensors:
                 logging.info("%s: Discovered type %s"%(address_ascii,repr(packet['parameter'])))
@@ -178,11 +184,12 @@ dispatch.register("NI", NI_handler, lambda packet: packet['command']=='NI')
 #  This method will dispatch a single XBee data packet when called
 zigbee = ZigBee(ser, callback=dispatch.dispatch, escaped=True)
 
-
+#zigbee.send('remote_at',options='\x40',frame_id="A",command="DD",dest_addr_long='\x00\x13\xa2\x00@\xaa\x16\xe4')
+#zigbee.send('at',options='\x40',frame="1",command="NC")
 load_modules(Module_Path)
 
-endpoint = TCP4ServerEndpoint(reactor, 8007)
-endpoint.listen(munin.MuninFactory(sensors))
+reactor.listenTCP(8007, munin.MuninFactory(sensors))
+reactor.listenTCP(8008, server.CommandsFactory(sensors,zigbee,dispatch))
 reactor.run()
 
 # halt() must be called before closing the serial
