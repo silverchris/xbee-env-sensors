@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 
 def adc_convert(sample,scale=1):
-        return round((((float(sample)*1200)/1023)*scale)/1000, 3)
+        return round((((float(sample)*1200)/1024)*scale)/1000, 3)
 
 def max6605_volt_temp(voltage):
         return (voltage-0.744)/0.0119
