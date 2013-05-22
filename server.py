@@ -6,6 +6,7 @@ import logging
 import re
 import binascii
 import struct
+import textwrap
 
 at_commands = [  # Xbee commands
     'DH','DL','MY','MP','NC','SH','SL','NI','SE','DE','CI','NP','DD','CH','ID',
@@ -46,10 +47,9 @@ class frame_id(object):
         self.valid_ids.append(struct.unpack('>B', id)[0])
         self.valid_ids.sort()
 
-
 class Commands(LineReceiver):
 
-    delimiter = '\n'
+    #delimiter = '\n'
 
     def __init__(self,sensors,zigbee,dispatch,frames,):
         self.sensors = sensors
@@ -60,6 +60,7 @@ class Commands(LineReceiver):
     def connectionMade(self):
         logging.debug('Commands: Connection from {0}'.format(
                 self.transport.getPeer()))
+        self.sendLine("#")
 
     def callback(self,name,packet):
         print "called back"
@@ -70,48 +71,97 @@ class Commands(LineReceiver):
         self.sendLine(packet.__str__())
 
     def lineReceived(self,line):
-        logging.debug('Commands: {0}: Received Command: {1}'.format(
-                self.transport.getPeer().host,line))
-        data = line.split(' ')
-        if line == 'quit':
-            self.transport.loseConnection()
-        else:
-            if data[0] in self.zigbee.api_commands:
-                mode = data[0]
-                command_re = re.compile('.((?P<dest_addr_long>[0-9A-Fa-f]{16});'
-                        '|(?P<dest_addr>[0-9A-Fa-f]{2});'
-                        ')(?P<command>[A-Z0-9]{2});'
-                        '((?P<parameter>[a-zA-Z0-9 ]+);'
-                        '.*|.*)',re.DOTALL)
-                try:
-                    command = command_re.search(line).groupdict()
-                    hex_re = re.compile('^[0-9A-Fa-f]+$')
-                    if command['command'] in at_commands:
-                        for (k, v) in command.items():
-                            if v == None:
-                                del command[k]
-                            elif hex_re.match(v) and any(v in item
-                                    for item in string_commands) != True:
-                                command[k] = binascii.unhexlify(v)
-                                if 'dest_addr' in k:
-                                    ascii_addr = v
-                        print command
-                        frame = self.frames.get_id()
-                        self.zigbee.send(mode, options='\x42',
-                                frame_id=frame, **command)
-                        self.dispatch.register('{addr}_{frame}'.format(
-                            frame=frame,addr=ascii_addr),
-                                self.callback, gen_lambda(mode,command,frame))
-                        print self.dispatch.handlers
-                        self.sendLine('Command Sent')
-                    else:
-                        self.sendLine('Invalid AT Command')
-                #except KeyError:
-                except AttributeError:
-                    self.sendLine('Invalid format')
-            else:
-                self.sendLine('Unknown Command')
+        # Ignore blank lines
+        if not line: return
+        line.__repr__()
+        # Parse the command
+        commandParts = line.split()
+        command = commandParts[0].lower()
+        args = commandParts[1:]
 
+        # Dispatch the command to the appropriate method.  Note that all you
+        # need to do to implement a new command is add another do_* method.
+        try:
+            method = getattr(self, 'do_' + command)
+        except AttributeError, e:
+            self.sendLine('Error: no such command.')
+            self.do_help()
+        else:
+            try:
+                method(*args)
+            except TypeError, e:
+                self.sendLine(str(e))
+                self.do_help(command)
+            except Exception, e:
+                self.sendLine('Error: ' + str(e))
+
+    def do_help(self, command=None):
+        """help [command]: List commands, or show help on the given command"""
+        if command:
+            self.sendLine(textwrap.dedent(
+                    getattr(self, 'do_' + command).__doc__))
+        else:
+            commands = [cmd[3:] for cmd in dir(self) if cmd.startswith('do_')]
+            self.sendLine("Valid commands: " +" ".join(commands))
+
+
+
+    def do_remote_at(self,*args):
+        """\
+        Send a at command to remote XBee. 
+        Input format: Address(Long or short) Command [Parameter] [Options]
+        Arguments enclosed in [] are optional"""
+        print len(args)
+        print args
+        if len(args) <= 1:
+            raise TypeError('Not enough Arguments')
+        packet = {}
+        if len(args[0]) == 16:
+            packet['dest_addr_long'] = binascii.unhexlify(args[0])
+        elif len(args[0]) == 4:
+            packet['dest_addr'] = binascii.unhexlify(args[0])
+        packet['command'] = args[1]
+        try:
+            if any(packet['command'] in i for i in string_commands) != True:
+                try:
+                    packet['parameter'] = binascii.unhexlify(args[2])
+                except TypeError:
+                    self.sendLine("Parameter must be a value in hex, except on"
+                            "commands: ND, DN, NI")
+                    return
+            else:
+                packet['parameter'] = args[2]
+        except IndexError:
+            pass
+        try:
+            packet['options'] = binascii.unhexlify[args[3]]
+        except IndexError:
+            packet['options'] = '\x42'
+        packet['frame_id'] = self.frames.get_id()
+        self.zigbee.send('remote_at',**packet)
+        self.sendLine(packet.__repr__())
+    
+    def do_at(self,*args):
+        """\
+        Send a at command to local XBee. 
+        Input format: Command [Parameter]
+        Arguments enclosed in [] are optional"""
+        self.sendLine("at")
+    
+    def do_queued_at(self,*args):
+        """\
+        Send a queued at command to local XBee. 
+        Input format: Command [Parameter]
+        Arguments enclosed in [] are optional"""
+        self.sendLine("queied_at")
+
+    def do_tx(self,*args):
+        """Not Yet Implemented"""
+        pass
+    
+    def do_tx_explicit(self,*args):
+        """Not Yet Implemented"""
+        pass
 
 class CommandsFactory(Factory):
 
