@@ -73,14 +73,14 @@ class Sensor(SensorBase.Sensor):
         timedelta = (now-self.timestamp).total_seconds()
         if timedelta <.400:
             self.timestamp = now
-            logging.debug("{address}: Time from last Update: {0}".format(timedelta,address=self.address_ascii))
+            self.logger.debug("Time from last Update: {0}".format(timedelta))
             #ignore updates that come too quickly or too slowly, to make sure sensors have had time
             #to stabilize
             self.raw_humidity.append(packet['samples'][0]['adc-1'])
             self.raw_temperature.append(packet['samples'][0]['adc-2'])
             self.raw_light.append(packet['samples'][0]['adc-3'])
             self.raw_battery.append(packet['samples'][0]['adc-7'])
-            logging.debug("{address}: Valid update processed".format(address=self.address_ascii))
+            self.logger.debug("Valid update processed")
         elif timedelta > .400:
             self.timestamp = datetime.now()
             self.raw_humidity = []
@@ -88,7 +88,7 @@ class Sensor(SensorBase.Sensor):
             self.raw_light = []
             self.raw_battery = []
             self.timestamp = now
-            logging.debug("{address}: Updating too slowly, ignored. {time}s".format(address=self.address_ascii, time=timedelta))
+            self.logger.debug("Updating too slowly, ignored. {time}s".format(time=timedelta))
                 
     def report(self):
         self.temperature = self.max6605(self.adc_convert(self.raw_temperature,1))

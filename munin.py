@@ -7,17 +7,18 @@ class Munin(LineReceiver):
         def __init__(self, sensors):
                 self.sensors = sensors
                 self.commands = {'nodes':self._nodes,'config':self._config,'list':self._list_sensors,'fetch':self._fetch,'version':self._version,'cap':self._cap}
+                self.logger = logging
                 
         def _nodes(self,parameter=""):
-                logging.debug("Munin: nodes called")
+                self.logger.debug("nodes called")
                 return "sensors"
 
         def _config(self,parameter=""):
-                logging.debug("Munin: config called on address {address}".format(address=parameter))
+                self.logger.debug("config called on address {address}".format(address=parameter))
                 return self.sensors[parameter].Munin_config()
 
         def _list_sensors(self,parameter=""):
-                logging.debug("Munin: list called")
+                self.logger.debug("list called")
                 commands = ""
                 for sensor in self.sensors:
                         if sensor != "":
@@ -25,11 +26,11 @@ class Munin(LineReceiver):
                 return commands
 
         def _fetch(self,parameter=""):
-                logging.debug("Munin: fetch called on address {address}".format(address=parameter))
+                self.logger.debug("fetch called on address {address}".format(address=parameter))
                 return self.sensors[parameter].Munin_fetch()
 
         def _version(self,parameter=""):
-                logging.debug("Munin: version called")
+                self.logger.debug("version called")
                 return "1"
 
         def _cap(self,parameter=""):
@@ -37,10 +38,12 @@ class Munin(LineReceiver):
         
         def connectionMade(self):
                 self.sendLine("# munin node at Sensors")
-                logging.debug("Munin: Connection from {0}".format(self.transport.getPeer()))
+                self.logger = logging.getLogger('{0} Munin'.format(
+                    self.transport.getPeer().host))
+                self.logger.info("Munin: Connected")
                 
         def lineReceived(self, line):
-                logging.debug("Munin: {0}: Received Command: {1}".format(self.transport.getPeer().host,line))
+                self.logger.debug("Received Command: {0}".format(line))
                 data = line.split(" ")
                 if line == "quit":
                         self.transport.loseConnection()

@@ -56,10 +56,12 @@ class Commands(LineReceiver):
         self.zigbee = zigbee
         self.dispatch = dispatch
         self.frames = frames
+        self.logger = logging
 
     def connectionMade(self):
-        logging.debug('Commands: Connection from {0}'.format(
-                self.transport.getPeer()))
+        self.logger = logging.getLogger('{0} Server'.format(
+                self.transport.getPeer().host))
+        self.logger.info('Connected')
         self.sendLine("#")
 
     def callback(self,name,packet):

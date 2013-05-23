@@ -24,7 +24,10 @@ BAUD_RATE = 9600
 
 Module_Path = os.path.join(os.path.dirname(os.path.realpath(__file__)),"Modules")
 
-logging.basicConfig(filename='Sensor.log',level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+logging.basicConfig(filename='Sensor.log',level=logging.DEBUG,
+        format='%(asctime)s [%(name)s].%(levelname)s: %(message)s')
+
+logger = logging.getLogger('Main')
 
 class SensorFactory:
         factories = {}
@@ -122,7 +125,7 @@ def load_modules(mod_path):
         for f in os.listdir(os.path.abspath(mod_path)):
                 module_name, ext = os.path.splitext(f) # Handles no-extension files, etc.
                 if ext == '.py': # Important, ignore .pyc/other files.
-                        logging.info('imported module: %s'%(module_name))
+                        logger.info('imported module: %s'%(module_name))
                         module = importlib.import_module(module_name,package=module_name)
                         modules[module_name] = module.Sensor
                         SensorFactory.addFactory(module_name, modules[module_name])
@@ -133,33 +136,33 @@ def unhandled(packet):
                 tmp_packet = copy.copy(packet)
                 address_ascii = binascii.hexlify(packet['source_addr_long'])
                 del tmp_packet['source_addr_long']
-                logging.debug("%s: Unhandled packet:%s"%(address_ascii,repr(tmp_packet)))
+                logger.debug("%s: Unhandled packet:%s"%(address_ascii,repr(tmp_packet)))
                 try:
                         if packet.get('command','') != 'NI':
                                 id_time = sensor_id_timeout.get(address_ascii, datetime(1970,1,1))
                                 if (datetime.now()-id_time).total_seconds() > 60:
                                         zigbee.send('remote_at',command="NI", dest_addr_long=packet['source_addr_long'], options='\x40', frame_id="1")
-                                        logging.info("%s: Node ID query sent"%binascii.hexlify(packet['source_addr_long']))
+                                        logger.info("%s: Node ID query sent"%binascii.hexlify(packet['source_addr_long']))
                                         sensor_id_timeout[address_ascii] = datetime.now()
                                 else:
-                                        logging.info("%s: Node ID query already sent, lets wait"%binascii.hexlify(packet['source_addr_long']))
+                                        logger.info("%s: Node ID query already sent, lets wait"%binascii.hexlify(packet['source_addr_long']))
                 except KeyError:
                         pass
 
         else:
-                logging.debug("Unhandled Packet: %s"%repr(packet))
+                logger.debug("Unhandled Packet: %s"%repr(packet))
         
 sensors = {}
         
 def NI_handler(name,packet):
         address_ascii = binascii.hexlify(packet['source_addr_long'])
         if address_ascii not in sensors:
-                logging.info("%s: Discovered type %s"%(address_ascii,repr(packet['parameter'])))
+                logger.info("%s: Discovered type %s"%(address_ascii,repr(packet['parameter'])))
                 sensorclass = SensorFactory.createSensor(packet['parameter'])
                 try:
                         sensors[address_ascii] = sensorclass(packet['source_addr_long'],dispatch)
                 except ValueError:
-                        logging.warning("Sensor Class %s Not Registered"%packet['parameter'])
+                        logger.warning("Sensor Class %s Not Registered"%packet['parameter'])
 
 # When a Dispatch is created with a serial port, it will automatically
 # create an XBee object on your behalf for accessing the device.
