@@ -5,9 +5,6 @@ from datetime import datetime
 import time
 import collections
 
-cal_data = {'0013a20040aa16e4':-0.584,'0013a20040aa16bd':0,'0013a2004086a9de':2.209}
-#cal_data = {'0013a20040aa16e4':-.55,'0013a20040aa16bd':0,'0013a2004086a9de':+3.2}
-
 munin_config = """multigraph {address}_temperature
 graph_title {address} Temperature
 graph_vlabel degrees Celsius
@@ -38,15 +35,29 @@ battery.value {battery}
 
 class Sensor(SensorBase.Sensor):
     def adc_convert(self,samples,scale=1):
-        sample = self.get_mode(samples)
-        return round((((float(sample)*1200)/1024)*scale)/1000, 3)
+        try:
+            sample = self.get_mode(samples)
+            value = round((((float(sample)*1200)/1024)*scale)/1000, 3)
+        except:
+            self.logger.exception("Could't convert ADC value {0} to voltage".format(sample))
+            value = "U"
+        return value
 
     def max6605(self,voltage):
-        return ((voltage-0.744)/0.0119)+self.temperature_cal
+        try:
+            value = (((voltage-0.744)/0.0119)+float(self.config['temp_cal']))
+        except:
+            self.logger.exception("Could't convert voltage {0} to temperature".format(sample))
+            value = "U"
+        return value
 
     def hih5030(self,sens_volts, bat_volts,temp):
-        rh = ((sens_volts/bat_volts)-0.1515)/0.00636
-        corrected_rh = (rh)/(1.0546-0.00216*temp)
+        try:
+            rh = ((sens_volts/bat_volts)-0.1515)/0.00636
+            corrected_rh = (rh)/(1.0546-0.00216*temp)
+        except:
+            self.logger.exception("Couldn't convert Sensor Voltage {0}, Battery Voltage {1} to humidity".format(sens_volts,bat_volts))
+            corrected_rh = "U"
         return corrected_rh
     
     def get_mode(self,data):
@@ -66,7 +77,6 @@ class Sensor(SensorBase.Sensor):
         self.raw_temperature = []
         self.raw_light = []
         self.raw_battery = []
-        self.temperature_cal = cal_data[self.address_ascii]
         
     def rx_io_data_long_addr(self,name,packet):
         now = datetime.now()
@@ -76,11 +86,14 @@ class Sensor(SensorBase.Sensor):
             self.logger.debug("Time from last Update: {0}".format(timedelta))
             #ignore updates that come too quickly or too slowly, to make sure sensors have had time
             #to stabilize
-            self.raw_humidity.append(packet['samples'][0]['adc-1'])
-            self.raw_temperature.append(packet['samples'][0]['adc-2'])
-            self.raw_light.append(packet['samples'][0]['adc-3'])
-            self.raw_battery.append(packet['samples'][0]['adc-7'])
-            self.logger.debug("Valid update processed")
+            if packet['samples'][0]['adc-7'] > 2300:
+                self.raw_humidity.append(packet['samples'][0]['adc-1'])
+                self.raw_temperature.append(packet['samples'][0]['adc-2'])
+                self.raw_light.append(packet['samples'][0]['adc-3'])
+                self.raw_battery.append(packet['samples'][0]['adc-7'])
+                self.logger.debug("Valid update processed")
+            else:
+                self.logger.warning("Battery voltage low, report thrown away")
         elif timedelta > .400:
             self.timestamp = datetime.now()
             self.raw_humidity = []
@@ -88,15 +101,21 @@ class Sensor(SensorBase.Sensor):
             self.raw_light = []
             self.raw_battery = []
             self.timestamp = now
-            self.logger.debug("Updating too slowly, ignored. {time}s".format(time=timedelta))
+            self.logger.debug("Updating too slowly, ignored. {time}s".format(
+                    time=timedelta))
                 
     def report(self):
         self.temperature = self.max6605(self.adc_convert(self.raw_temperature,1))
         self.battery = self.adc_convert(self.raw_battery)
-        self.humidity = self.hih5030(self.adc_convert(self.raw_humidity,2),self.battery,self.temperature)
+        self.humidity = self.hih5030(self.adc_convert(self.raw_humidity,2)
+                ,self.battery,self.temperature)
         
     def Munin_config(self):
-        return munin_config.format(address=self.address_ascii,category=self.location)
+        return munin_config.format(address=self.address_ascii,
+                        category=self.config['location'])
     def Munin_fetch(self):
          self.report()
-         return munin_fetch.format(address=self.address_ascii,temperature=self.temperature,humidity=self.humidity,battery=self.battery)
+         return munin_fetch.format(address=self.address_ascii,
+                        temperature=self.temperature,
+                        humidity=self.humidity,battery=self.battery)
+                    

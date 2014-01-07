@@ -12,20 +12,19 @@ from twisted.internet.endpoints import TCP4ServerEndpoint
 from twisted.internet import reactor
 import logging
 import copy
-
+import ConfigParser
 
 import munin
 import server
 
-PORT = '/dev/ttyUSB0'
 
-#PORT = '/dev/pts/3'
-BAUD_RATE = 9600
+config = ConfigParser.ConfigParser()
+config.read('config.ini')
 
-Module_Path = os.path.join(os.path.dirname(os.path.realpath(__file__)),"Modules")
+Module_Path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                           config._sections['main']['modules'])
 
-logging.basicConfig(filename='Sensor.log',level=logging.DEBUG,
-        format='%(asctime)s [%(name)s].%(levelname)s: %(message)s')
+logging.basicConfig(**config._sections['logging'])
 
 logger = logging.getLogger('Main')
 
@@ -97,8 +96,6 @@ class Dispatch(object):
                 registered callback method and calls each callback whose filter 
                 function returns true.
                 """
-                print "Frame Received"
-                #print packet
                 handled = False
                 for handler in self.handlers:
                         try:
@@ -113,7 +110,8 @@ class Dispatch(object):
                         self.unhandled(packet)
 
 # Open serial port
-ser = serial.Serial(PORT, BAUD_RATE)
+ser = serial.Serial(config._sections['serial']['port'],
+                    config._sections['serial']['baudrate'])
 
 def load_modules(mod_path):
         
@@ -160,7 +158,7 @@ def NI_handler(name,packet):
                 logger.info("%s: Discovered type %s"%(address_ascii,repr(packet['parameter'])))
                 sensorclass = SensorFactory.createSensor(packet['parameter'])
                 try:
-                        sensors[address_ascii] = sensorclass(packet['source_addr_long'],dispatch)
+                        sensors[address_ascii] = sensorclass(packet['source_addr_long'],dispatch,config._sections[address_ascii])
                 except ValueError:
                         logger.warning("Sensor Class %s Not Registered"%packet['parameter'])
 

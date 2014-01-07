@@ -3,11 +3,13 @@ import logging
 
 class Sensor(object):
         Type = "Dummy"
-        def __init__(self,address,dispatch):
+        def __init__(self,address,dispatch,config={}):
                 self.address = address
                 self.address_ascii = binascii.hexlify(self.address)
-                self.location = "ROOM_GOES_HERE"
-                logging.info("%s: Connected to %s Module"%(self.address_ascii,self.Type))
+                self.config = config
+                print(config)
+                logging.info("%s: Connected to %s Module"%(self.address_ascii,
+                                                           self.Type))
                 self._localinit(dispatch)
                 self.logger = logging.getLogger(self.address_ascii)
                 
