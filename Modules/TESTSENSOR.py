@@ -115,7 +115,12 @@ class Sensor(SensorBase.Sensor):
                         category=self.config['location'])
     def Munin_fetch(self):
          self.report()
-         return munin_fetch.format(address=self.address_ascii,
-                        temperature=self.temperature,
-                        humidity=self.humidity,battery=self.battery)
+         if self.battery > 2.95:
+             return munin_fetch.format(address=self.address_ascii,
+                                       temperature=self.temperature,
+                                       humidity=self.humidity,
+                                       battery=self.battery)
+         else:
+             return munin_fetch.format(address='NaN', temperature='NaN',
+                                       humidity='NaN',battery=self.battery
                     
