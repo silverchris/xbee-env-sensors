@@ -122,5 +122,5 @@ class Sensor(SensorBase.Sensor):
                                        battery=self.battery)
          else:
              return munin_fetch.format(address='NaN', temperature='NaN',
-                                       humidity='NaN',battery=self.battery
+                                       humidity='NaN',battery=self.battery)
                     
